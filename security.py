@@ -89,9 +89,13 @@ def main():
         elif args.action == "ports":
             if len(args.ports) > 20:
                 parser.error("Indicar entre 1 y 20 puertos, cada uno entre 1 y 65535")
+            ports = []
             for port in args.ports:
                 if port < 1 or port > 65535:
                     parser.error("Indicar entre 1 y 20 puertos, cada uno entre 1 y 65535")
+                if port not in ports:
+                    ports.append(port)
+            for port in ports:
                 for host in ("127.0.0.1", "::1"):
                     try:
                         with socket.create_connection((host, port), timeout=1):
