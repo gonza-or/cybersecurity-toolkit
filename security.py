@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-"""Consultas defensivas locales y utilidades de integridad."""
-
 import argparse
 import hashlib
 import hmac
@@ -19,17 +17,32 @@ import psutil
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
             digest.update(chunk)
     return digest.hexdigest()
 
 
 def make_password(length):
-    groups = (string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%+-_=?.")
+    groups = [string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%+-_=?."]
     alphabet = "".join(groups)
     while True:
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
-        if all(any(char in group for char in password) for group in groups):
+        password = ""
+        for _ in range(length):
+            password += secrets.choice(alphabet)
+        valid = True
+        for group in groups:
+            found = False
+            for char in password:
+                if char in group:
+                    found = True
+                    break
+            if not found:
+                valid = False
+                break
+        if valid:
             return password
 
 
@@ -46,7 +59,7 @@ def inspect_log(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Consultas de seguridad local")
     commands = parser.add_subparsers(dest="action", required=True)
     for name in ("hash", "verify", "logs"):
         command = commands.add_parser(name)
@@ -74,31 +87,39 @@ def main():
                 parser.error("La longitud debe estar entre 12 y 128")
             print(make_password(args.length))
         elif args.action == "ports":
-            if len(args.ports) > 20 or any(port < 1 or port > 65535 for port in args.ports):
+            if len(args.ports) > 20:
                 parser.error("Indicar entre 1 y 20 puertos, cada uno entre 1 y 65535")
-            for port in dict.fromkeys(args.ports):
+            for port in args.ports:
+                if port < 1 or port > 65535:
+                    parser.error("Indicar entre 1 y 20 puertos, cada uno entre 1 y 65535")
                 for host in ("127.0.0.1", "::1"):
                     try:
                         with socket.create_connection((host, port), timeout=1):
-                            print(f"[{host}]:{port} acepta TCP")
+                            print("[{}]:{} acepta TCP".format(host, port))
                     except OSError:
-                        print(f"[{host}]:{port} sin conexión TCP")
+                        print("[{}]:{} sin conexión TCP".format(host, port))
         elif args.action == "connections":
             for connection in psutil.net_connections(kind="inet"):
-                local = f"{connection.laddr.ip}:{connection.laddr.port}" if connection.laddr else "-"
-                remote = f"{connection.raddr.ip}:{connection.raddr.port}" if connection.raddr else "-"
-                print(f"PID {connection.pid} | {local} -> {remote} | {connection.status}")
-            print("La visibilidad depende de permisos; la lista puede ser parcial.")
+                if connection.laddr:
+                    local = "{}:{}".format(connection.laddr.ip, connection.laddr.port)
+                else:
+                    local = "-"
+                if connection.raddr:
+                    remote = "{}:{}".format(connection.raddr.ip, connection.raddr.port)
+                else:
+                    remote = "-"
+                print("PID {} | {} -> {} | {}".format(connection.pid, local, remote, connection.status))
+            print("La lista puede ser parcial según los permisos.")
         elif args.action == "processes":
             for process in psutil.process_iter(["pid", "name", "status"], ad_value="Sin permiso"):
-                print(f"{process.info['pid']} | {process.info['name']} | {process.info['status']}")
+                print("{} | {} | {}".format(process.info["pid"], process.info["name"], process.info["status"]))
         elif args.action == "system":
-            print(f"Hostname: {socket.gethostname()}\nSistema: {platform.platform()}")
-            print(f"CPU lógicas: {psutil.cpu_count()}\nRAM: {psutil.virtual_memory().total / 1024**3:.2f} GiB")
+            print("Hostname: {}\nSistema: {}".format(socket.gethostname(), platform.platform()))
+            print("CPU lógicas: {}\nRAM: {:.2f} GiB".format(psutil.cpu_count(), psutil.virtual_memory().total / 1024**3))
         elif args.action == "logs":
             print(json.dumps(inspect_log(args.file), ensure_ascii=False, indent=2))
     except (OSError, psutil.Error) as error:
-        print(f"No se pudo completar la consulta: {error}")
+        print("Error: {}".format(error))
         return 1
     return 0
 
